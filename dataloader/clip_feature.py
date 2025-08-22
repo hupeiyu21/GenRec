@@ -112,11 +112,11 @@ def parse_args():
     parser.add_argument('--data_version', type=str, default='14', choices=['14', '18'], help='数据集年份版本 (14 或 18)')
     parser.add_argument('--dataset', type=str, default='Home', help='例如 Baby, All_Beauty, Home 等')
     # 将 image_root 的默认值改为更通用的根目录
-    parser.add_argument('--image_root', type=str, default="../datasets", help='包含 amazon14/ 和 amazon18/ 的根目录')
+    parser.add_argument('--image_root', type=str, default="../datasets/amazon14/Images", help='包含 amazon14/ 和 amazon18/ 的根目录')
     # `save_root` 是上一步(2_process.sh)的输出目录，也是本脚本的输入和输出目录
     parser.add_argument('--save_root', type=str, default="../datasets", help='预处理后数据的根目录')
     parser.add_argument('--backbone', type=str, default='ViT-L/14', help='CLIP模型的主干网络')
-    parser.add_argument('--model_cache_dir', type=str, default='./clip_cache', help='CLIP模型下载缓存目录')
+    parser.add_argument('--model_cache_dir', type=str, default='../cache_models/clip', help='CLIP模型下载缓存目录')
     # gpu_id 参数通常由 CUDA_VISIBLE_DEVICES 控制，这里可以移除或保留
     # parser.add_argument('--gpu_id', type=int, default=0, help='ID of running GPU') 
     return parser.parse_args()
@@ -126,3 +126,4 @@ if __name__ == "__main__":
     # 如果您想用 gpu_id 参数控制GPU，可以取消下面这行的注释
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
     get_feature(args)
+    

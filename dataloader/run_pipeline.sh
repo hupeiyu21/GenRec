@@ -9,8 +9,8 @@ set -e  # Exit on any error
 DATASET="Baby"
 INPUT_PATH="../datasets"
 OUTPUT_PATH="../datasets"
-GPU_ID="2"
-MODEL_PATH="/mnt/disk9T/zj/projects/peiyu/LLM_Models/Qwen/Qwen3-Embedding-8B"
+GPU_ID="0"
+MODEL_PATH="/root/Qwen/models--Qwen--Qwen3-Embedding-8B/snapshots/1d8ad4ca9b3dd8059ad90a75d4983776a23d44af/"
 PLM_NAME="qwen"
 IMAGE_ROOT="../datasets/amazon14/Images"
 MODEL_CACHE_DIR="../cache_models/clip"
@@ -246,13 +246,13 @@ if should_run_step "fusion-emb"; then
     print_step "Fusion Embeddings"
     echo "Fusing embeddings for $DATASET dataset..."
     export CUDA_VISIBLE_DEVICES="$GPU_ID"
-python fusion_embeddings.py \
-    --method cross-attention \
-    --dataset_name $DATASET \
-    --epochs 20 \
-    --embed_dim 768 \
-    --nhead 4
-
+    python fusion_embeddings.py \
+        --method cross-attention \
+        --dataset_name $DATASET \
+        --epochs 20 \
+        --embed_dim 768 \
+        --nhead 4
+fi
 
 echo ""
 echo "=========================================="
