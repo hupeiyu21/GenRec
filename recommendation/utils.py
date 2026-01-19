@@ -262,20 +262,27 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
+import json
+import logging
+from pathlib import Path
+from collections import Counter
+from typing import Dict, Any, List, Tuple, Optional
+
 def load_item_category_map(
     dataset_root: Path,
     dataset_name: str,
     return_cate_names: bool = False,
     min_items_per_cate: int = 5,
     max_categories: int = 0,
+    split_threshold: float = 0.01,  # [修改] 默認閾值降為 1%，讓類別更容易被拆分
+    use_composite_keys: bool = True # [修改] 新增參數，是否組合最後兩級 (e.g. "Guitars > Electric")
 ):
     """
     從預處理生成的 item.json 中提取類別信息，返回 {item_id(1-based): category_id} 映射。
-    - 自動檢測並跳過佔比過高的根類（如「Musical Instruments」），優先取下一級。
-    - 若缺失則回退到 genres[0]（MovieLens）。
-    - 再缺則用 brand 作為弱類別。
-    - 如果仍只有根類，嘗試用 codebook 前兩級作為備用類別，避免全部落在同一類。
-    - return_cate_names=True 時，同時返回 {cate_id: cate_name} 以便後續統計。
+    [修改版特性]:
+    - 默認採用「葉子優先」(Leaf-first) 策略，直接取最細粒度的分類。
+    - 支持組合鍵 (Parent > Child) 以區分不同大類下的同名子類。
+    - 降低拆分閾值，大幅增加類別數量，解決多樣性指標階躍問題。
     """
     item_file = dataset_root / f"{dataset_name}.item.json"
     if not item_file.is_file():
@@ -294,7 +301,7 @@ def load_item_category_map(
     missing = 0
     parsed_categories: dict = {}
 
-    # 先解析出 categories 的層級，方便後續統計/跳過根類
+    # 1. 解析 Categories 層級
     for item_str, info in item_meta.items():
         categories = info.get("categories")
         tokens = []
@@ -304,13 +311,15 @@ def load_item_category_map(
             tokens = [c.strip() for c in categories.split(",") if c.strip()]
         parsed_categories[item_str] = tokens
 
-    # 檢測是否存在佔比極高的根類（例如全部都是 Musical Instruments）
+    # 2. 檢測並跳過佔比極高的根類（例如 Amazon 數據集中的 "Musical Instruments"）
     first_level_counter = Counter(tokens[0] for tokens in parsed_categories.values() if tokens)
     dominant_root = None
     total_with_cate = sum(1 for tokens in parsed_categories.values() if tokens)
+    
     if first_level_counter and total_with_cate:
         root_candidate, cnt = first_level_counter.most_common(1)[0]
-        if cnt / total_with_cate >= 0.9:  # 90% 以上視為需要跳過的根類
+        # [修改] 將閾值從 0.9 降為 0.5，更激進地去除無效的根節點
+        if cnt / total_with_cate >= 0.5: 
             dominant_root = root_candidate
             logging.info(
                 f"[Diversity] Detected dominant root category '{dominant_root}' "
@@ -318,50 +327,24 @@ def load_item_category_map(
             )
     root_norm = dominant_root.lower() if dominant_root else None
 
-    # 構建去除根類的層級列表，並根據統計決定使用淺層還是最細粒度
+    # 構建去除根類的層級列表
     parsed_no_root = {}
-    max_depth = 0
     for item_str, tokens in parsed_categories.items():
         cleaned = tokens
         if tokens and root_norm and tokens[0].lower() == root_norm:
             cleaned = tokens[1:]
         parsed_no_root[item_str] = cleaned
-        max_depth = max(max_depth, len(cleaned))
 
-    depth_counters = []
-    depth_dominance = []
-    total_items = len(parsed_no_root)
-    depth0_coverage = (
-        sum(1 for toks in parsed_no_root.values() if len(toks) > 0) / total_items
-    ) if total_items else 0.0
-    for d in range(max_depth):
-        ctr = Counter(toks[d] for toks in parsed_no_root.values() if len(toks) > d)
-        depth_counters.append(ctr)
-        total_d = sum(ctr.values())
-        dom_ratio = (ctr.most_common(1)[0][1] / total_d) if total_d else None
-        depth_dominance.append(dom_ratio)
-
-    # 如果第一層非根類依然高度集中且覆蓋高，才切到更深的細粒度
-    use_deepest = False
-    if max_depth > 0:
-        dom0 = depth_dominance[0]
-        if dom0 is not None and dom0 > 0.8 and max_depth > 1 and depth0_coverage >= 0.8:
-            use_deepest = True
-            logging.info(
-                f"[Diversity] First non-root category dominance={dom0:.2f}, "
-                f"coverage={depth0_coverage:.2f}; switch to deepest level."
-            )
-
-    # 預備 codebook 前兩級作為備用類別（僅在存在單一根類時啟用）
+    # 3. 預備 Codebook 作為備用 (保持原邏輯)
     codebook_prefixes = {}
-    if dominant_root:
+    if dominant_root or missing > 0: # 稍微放寬條件，讓 missing 的時候也能加載
         codebook_dir = dataset_root / "codebooks"
         preferred = codebook_dir / f"{dataset_name}.text.rqvae.codebook.json"
         codebook_file = preferred if preferred.is_file() else None
         if not codebook_file and codebook_dir.is_dir():
             candidates = sorted(codebook_dir.glob("*.codebook.json"))
-            if candidates:
-                codebook_file = candidates[0]
+            if candidates: codebook_file = candidates[0]
+        
         if codebook_file:
             try:
                 with open(codebook_file, "r", encoding="utf-8") as f:
@@ -369,104 +352,114 @@ def load_item_category_map(
                 for key, value in codebook_data.items():
                     try:
                         idx = int(key)
-                    except (TypeError, ValueError):
-                        continue
-                    parts = [p.strip("<>") for p in str(value).split() if p]
-                    if len(parts) >= 2:
-                        codebook_prefixes[idx] = f"{parts[0]}|{parts[1]}"
-                    elif parts:
-                        codebook_prefixes[idx] = parts[0]
-                logging.info(
-                    f"[Diversity] Loaded codebook prefixes from {codebook_file} "
-                    f"for category fallback (entries={len(codebook_prefixes)})."
-                )
+                        parts = [p.strip("<>") for p in str(value).split() if p]
+                        if len(parts) >= 2:
+                            codebook_prefixes[idx] = f"{parts[0]}|{parts[1]}"
+                        elif parts:
+                            codebook_prefixes[idx] = parts[0]
+                    except: continue
+                logging.info(f"[Diversity] Loaded codebook prefixes for fallback ({len(codebook_prefixes)} entries).")
             except Exception as exc:
                 logging.warning(f"[Diversity] failed to load codebook prefixes: {exc}")
 
-    # 第一輪：確定初始類別
+    # 4. 第一輪：確定初始類別 (核心修改：葉子優先)
     item_to_raw_cate = {}
-    item_tokens_no_root = {}
+    item_tokens_no_root = {} # 保存 tokens 供後續細分使用
+
     for item_str, info in item_meta.items():
         cat = None
         tokens = parsed_categories.get(item_str, [])
         tokens_no_root = parsed_no_root.get(item_str, [])
-        if tokens_no_root:
-            # 根據統計選擇類別層級：非根最細或第一級
-            cat = tokens_no_root[-1] if use_deepest else tokens_no_root[0]
-        elif tokens:
-            # 只有根類，按策略決定是否保留根
-            cat = tokens[-1] if use_deepest else tokens[0]
+        
+        # [修改] 優先策略：直接使用去除根節點後的最深層級
+        candidate_tokens = tokens_no_root if tokens_no_root else tokens
+        
+        if candidate_tokens:
+            if use_composite_keys and len(candidate_tokens) >= 2:
+                # [策略 A] 組合鍵: "Parent > Child" (區分度最高)
+                cat = f"{candidate_tokens[-2]} > {candidate_tokens[-1]}"
+            else:
+                # [策略 B] 葉子節點: 取最後一級
+                cat = candidate_tokens[-1]
 
+        # 降級策略 1: Genre (通常比 Brand 寬泛，但也可用)
         if not cat:
             genres = info.get("genres")
             if isinstance(genres, list) and len(genres) > 0:
                 cat = str(genres[0]).strip()
 
+        # 降級策略 2: Brand (作為弱類別補充)
         if not cat:
             brand = info.get("brand", "").strip()
             if brand:
-                cat = f"brand::{brand}"
+                cat = f"Brand: {brand}"
 
-        # 如果仍然只有根類或缺失，嘗試用 codebook 前兩級做備用類別
+        # 降級策略 3: Codebook
         try:
             iid = int(item_str)
         except ValueError:
             missing += 1
             continue
-        if use_deepest and (not cat or (root_norm and cat.lower() == root_norm)) and codebook_prefixes:
-            cb = codebook_prefixes.get(iid)
-            if cb:
-                cat = f"code::{cb}"
+
+        if not cat and iid in codebook_prefixes:
+            cat = f"Code: {codebook_prefixes[iid]}"
 
         if not cat:
             missing += 1
             continue
 
-        # 模型內部 item_id 是 1-based
+        # 模型內部 item_id 是 1-based，這裡要做轉換
         item_to_raw_cate[iid + 1] = cat
-        item_tokens_no_root[iid + 1] = tokens_no_root
+        item_tokens_no_root[iid + 1] = candidate_tokens
 
     total_items_with_cate = len(item_to_raw_cate)
 
-    # 第二輪：對占比過高的類別嘗試細分（進一步使用更深層的類別）
-    split_threshold = 0.20
+    # 5. 第二輪：對過於龐大的類別進行強制細分 (使用 split_threshold)
     if total_items_with_cate > 0:
         updated_global = True
-        while updated_global:
+        loop_cnt = 0
+        # 允許迭代 3 次，應對層級很深的情況
+        while updated_global and loop_cnt < 3: 
             updated_global = False
+            loop_cnt += 1
             raw_counter = Counter(item_to_raw_cate.values())
+            
             for cate, cnt in list(raw_counter.items()):
+                # [修改] 使用傳入的低閾值 (e.g. 0.01)
                 if cnt / total_items_with_cate <= split_threshold:
                     continue
-                # 對該類別的 item 嘗試用「當前層級的下一層」進行細分
+                
+                # 對該類別進行細分嘗試
                 for iid, cur_cate in list(item_to_raw_cate.items()):
-                    if cur_cate != cate:
-                        continue
-                    toks_nr = item_tokens_no_root.get(iid, [])
+                    if cur_cate != cate: continue
+                    
+                    toks = item_tokens_no_root.get(iid, [])
+                    if not toks: continue
+
+                    # 嘗試拼接更多層級來區分
+                    # 邏輯：如果當前已經用了 "A > B"，嘗試變成 "A > B > C" (如果 C 存在)
+                    # 這裡簡化處理：直接取最後 3 級
                     new_cate = None
-                    if cate in toks_nr:
-                        idx = toks_nr.index(cate)
-                        if idx + 1 < len(toks_nr):
-                            new_cate = toks_nr[idx + 1]
-                        elif len(toks_nr) > 1:
-                            new_cate = toks_nr[-1]
-                    elif len(toks_nr) >= 2:
-                        new_cate = toks_nr[1]
-                    elif len(toks_nr) == 1:
-                        new_cate = toks_nr[0]
+                    if len(toks) >= 3:
+                         new_cate = " > ".join(toks[-3:])
+                    elif len(toks) == 2 and cur_cate != " > ".join(toks):
+                         new_cate = " > ".join(toks)
+                    elif len(toks) == 1 and cur_cate != toks[0]:
+                         new_cate = toks[0]
+                    
                     if new_cate and new_cate != cate:
                         item_to_raw_cate[iid] = new_cate
                         updated_global = True
-            if not updated_global:
-                break
 
-    # 第三輪：強制類別至少包含 min_items_per_cate，且限制總類別數
+    # 6. 第三輪：合併過小類別 (Tail Merging)
     raw_counter = Counter(item_to_raw_cate.values())
     small_cates = {c for c, cnt in raw_counter.items() if cnt < min_items_per_cate}
+    
     if max_categories and len(raw_counter) > max_categories:
         for idx, (cate, _) in enumerate(raw_counter.most_common()):
             if idx >= max_categories:
                 small_cates.add(cate)
+                
     if small_cates:
         other_name = "other"
         for iid, cate in list(item_to_raw_cate.items()):
@@ -474,16 +467,20 @@ def load_item_category_map(
                 item_to_raw_cate[iid] = other_name
         raw_counter = Counter(item_to_raw_cate.values())
 
-    # 重新編碼 cate_id
-    for cate in raw_counter.keys():
-        cate_id = cate2id.setdefault(cate, len(cate2id))
+    # 7. 重新編碼 cate_id
+    # 按數量降序排列 ID，方便後續觀察
+    sorted_cates = sorted(raw_counter.keys(), key=lambda x: raw_counter[x], reverse=True)
+    for cate in sorted_cates:
+        cate2id[cate] = len(cate2id)
+        
     for iid, cate in item_to_raw_cate.items():
         item_to_cate[iid] = cate2id[cate]
 
     logging.info(
-        f"[Diversity] Loaded categories for {len(item_to_cate)} items "
-        f"(distinct categories={len(cate2id)}, missing={missing})."
+        f"[Diversity] Loaded fine-grained categories for {len(item_to_cate)} items "
+        f"(distinct={len(cate2id)}, missing={missing}, split_thre={split_threshold:.2%})."
     )
+    
     if return_cate_names:
         id_to_cate = {cid: cname for cname, cid in cate2id.items()}
         return item_to_cate, id_to_cate

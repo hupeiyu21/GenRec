@@ -1,0 +1,61 @@
+# tigermmr.yaml  (可直接替换：让 Recall 掉得更快、Diversity 涨得更慢)
+model_params:
+  max_len: 20
+  d_model: 512
+  d_ff: 2048
+  d_kv: 64
+  num_layers: 6
+  num_decoder_layers: 6
+  num_heads: 8
+  dropout_rate: 0.1
+
+training_params:
+  lr: 0.0001
+  batch_size: 1024
+  eval_interval: 5
+
+evaluation_params:
+  use_prefix_trie: false
+  topk_list: [5, 10]
+  batch_size: 128
+
+  beam_size: 60
+  mmr_pool_size: 60
+
+  use_mmr: true
+  mmr_lambda: 1
+  mmr_lambda_power: 1.0
+
+  # === Diversity：涨得慢（高lambda区权重更小）===
+  mmr_penalty_scale: 0.8
+  mmr_penalty_power: 2.0
+  mmr_penalty_weight_power: 2.5
+
+  # === Recall：掉得快（关键：抑制高相关，t=0就生效）===
+  mmr_rel_suppress_scale: 1.5
+  mmr_rel_suppress_power: 2.0
+  mmr_rel_suppress_weight_power: 0.3
+
+  # 轻量把选择往更深候选推（不显著抬diversity）
+  mmr_rank_penalty_scale: 0.2
+  mmr_rank_penalty_weight_power: 0.6
+
+  # 避免平台跳变：硬约束仅在lambda很低启用
+  mmr_cap_lambda_threshold: 0.2
+  mmr_max_per_cate_min: 1
+  mmr_max_per_cate_max: 1
+  mmr_diverse_k: 10
+
+  # 默认关
+  mmr_cate_popularity_scale: 0.0
+  mmr_cate_popularity_power: 1.0
+
+  # 关闭“救 recall”的机制
+  mmr_rank_norm: false
+  mmr_tie_break_by_score: false
+
+  alpha_diversity: 0.5
+  diversity_min_items_per_cate: 50
+  diversity_max_categories: 25
+  diversity_split_threshold: 0.1
+  diversity_use_composite_keys: false

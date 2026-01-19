@@ -1,8 +1,6 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from typing import List, Dict, Any, Callable
-import numpy as np
-import random
 import logging
 
 logger = logging.getLogger(__name__)
@@ -62,19 +60,19 @@ class BaseTokenizer:
             if padded_sequences:
                  return torch.stack(padded_sequences)
             else:
-                 return torch.empty((0, max_len), dtype=torch.long) # Handle empty batch
+                return torch.empty((0, max_len), dtype=torch.long) # Handle empty batch
         else:
             raise ValueError(f"不支持的 padding_side: {padding_side}")
 
-class AdaDiffTokenizer(BaseTokenizer):
+
+class ReGenTokenizer(BaseTokenizer):
     """
-    為 AdaDiff 構造輸入，強制左填充並支持訓練/評估兩種掩碼策略。
+    為 ReGen， 構造輸入，強制左填充並支持訓練/評估兩種掩碼策略。
     """
 
     def __init__(self, config: Dict[str, Any], item_to_code_map: Dict[int, List[int]], is_training: bool):
         super().__init__(config, item_to_code_map)
         self.is_training = is_training
-        self.history_mask_prob = config["model_params"].get("history_mask_prob", 0.15)
 
     def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         sequences = []
@@ -108,29 +106,11 @@ class AdaDiffTokenizer(BaseTokenizer):
 
         for i, seq_len in enumerate(seq_lens):
             pad_len = max_len - seq_len
-            # History masking (training only)
-            if self.is_training and hist_token_lens[i] > 0:
-                hist_start = pad_len + 1  # skip [CLS]
-                hist_end = hist_start + hist_token_lens[i]
-                for idx in range(hist_start, hist_end):
-                    if random.random() < self.history_mask_prob:
-                        padded[i, idx] = self.mask_token_id
-                        # labels 保持 -100
-
             # Target masking
             target_slice = slice(target_start, max_len)
             if self.is_training:
-                # 訓練階段：隨機遮蔽 0%~100% 的 target token，保留部分上下文以穩定收斂
-                mask_ratio = np.random.uniform(0.0, 1.0)
-                num_to_mask = max(1, int(np.ceil(mask_ratio * self.code_len)))
-                mask_positions = set(np.random.choice(self.code_len, size=num_to_mask, replace=False).tolist())
-                for offset in range(self.code_len):
-                    abs_idx = target_start + offset
-                    if offset in mask_positions:
-                        labels[i, abs_idx] = padded[i, abs_idx]
-                        padded[i, abs_idx] = self.mask_token_id
-                    else:
-                        labels[i, abs_idx] = -100
+                # 訓練階段：保持 target 原樣，掩碼邏輯移至模型內的 GPU pipeline
+                labels[i, target_slice] = -100
             else:
                 # 評估：target 全掩碼，labels 僅保存真值供評估使用
                 labels[i, target_slice] = -100
@@ -310,12 +290,12 @@ def get_tokenizer(model_name: str, config: Dict[str, Any], item_to_code_map: Dic
     (保持之前的版本不變)
     """
     model_name = model_name.upper()
-    if model_name == 'ADADIFF':
+    if model_name == 'REGEN':
         return {
-            'train': AdaDiffTokenizer(config, item_to_code_map, is_training=True),
-            'eval': AdaDiffTokenizer(config, item_to_code_map, is_training=False)
+            'train': ReGenTokenizer(config, item_to_code_map, is_training=True),
+            'eval': ReGenTokenizer(config, item_to_code_map, is_training=False)
         }
-    if model_name == 'TIGER':
+    if model_name in ('TIGER', 'TIGER_MMR'):
         return GenerativeTokenizer(config, item_to_code_map, padding_side='right')
     elif 'GPT2' in model_name or 'LLM' in model_name:
         return GenerativeTokenizer(config, item_to_code_map, padding_side='left')

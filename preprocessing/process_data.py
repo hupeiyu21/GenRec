@@ -550,6 +550,9 @@ if __name__ == '__main__':
     print("Total items (with meta):", len(item2feature))
     print("Total items (in inters):", len(item2index))
     print("Total interactions:", len(rating_inters))
+    sparsity = 1 - len(rating_inters) / (len(user2index) * len(item2index))
+    print(f"Sparsity: {sparsity * 100:.4f}%")
+
     write_json_file(item2feature, os.path.join(output_dataset_path, f'{args.dataset}.item.json'))
     
     # 保存映射文件
