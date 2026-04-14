@@ -15,7 +15,7 @@ model_params:
 # 假設 TIGER 模型使用較小的學習率效果更好
 training_params:
   lr: 0.0001 
-  batch_size: 1536
+  batch_size: 128
   # 注意：我們沒有寫 batch_size，它會自動從 base.yaml 繼承
 
 evaluation_params:

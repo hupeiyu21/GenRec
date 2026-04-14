@@ -7,6 +7,7 @@ import importlib
 from datetime import datetime
 from collections import defaultdict
 import numpy as np
+import yaml
 
 def get_model(model_name: str):
     """
@@ -35,6 +36,11 @@ def get_model(model_name: str):
         )
         
     return model_class
+
+
+def load_yaml_file(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
     
 def setup_paths(args):
     """根据输入参数构建路径 (自动处理单模态和多模态)"""

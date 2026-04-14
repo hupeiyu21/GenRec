@@ -1,21 +1,23 @@
 import argparse
+import gzip
 import os
+import shutil
 import sys
 import tarfile
 import zipfile
-import gzip
-import shutil
 from typing import Dict
 
 import requests
 from requests.adapters import HTTPAdapter
+from tqdm import tqdm
 from urllib3.util import Retry
 import yaml
-from tqdm import tqdm
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Download dataset by dataset from url.yaml and extract to datasets folder.")
+    parser = argparse.ArgumentParser(
+        description="Download dataset by dataset from url.yaml and extract to datasets folder."
+    )
     parser.add_argument("--dataset", required=True, help="dataset defined in url.yaml")
     parser.add_argument(
         "--url_file",
@@ -24,7 +26,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output_dir",
-        default=os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "datasets")),
+        default=os.path.join("..", "datasets"),
         help="Directory to save downloaded and extracted datasets",
     )
     parser.add_argument(
@@ -33,6 +35,10 @@ def parse_args():
         help="Overwrite existing extracted folder if it already exists",
     )
     return parser.parse_args()
+
+
+def build_target_dir(output_root: str, dataset_name: str) -> str:
+    return os.path.join(output_root, f"recbole_{dataset_name}")
 
 
 def load_url_map(url_file: str) -> Dict[str, str]:
@@ -83,7 +89,7 @@ def download_with_progress(url: str, dest_path: str):
         print(f"[Info] Downloaded to {dest_path}")
     except Exception:
         if os.path.exists(dest_path):
-            os.remove(dest_path)  # remove partial file to allow retry
+            os.remove(dest_path)
         raise
 
 
@@ -93,68 +99,86 @@ def _safe_join(base: str, *paths: str) -> str:
         raise RuntimeError(f"Unsafe path detected: {final_path}")
     return final_path
 
-import os
-import zipfile
-import tarfile
-import gzip
-import shutil
 
-def extract_and_rename_all(archive_path: str, dataset_name: str):
+def _replace_path(src_path: str, dst_path: str):
+    if os.path.isdir(dst_path):
+        shutil.rmtree(dst_path)
+    elif os.path.exists(dst_path):
+        os.remove(dst_path)
+    shutil.move(src_path, dst_path)
+
+
+def _collect_extracted_roots(extract_dir: str, members):
+    roots = []
+    for member in members:
+        if not member:
+            continue
+        roots.append(os.path.join(extract_dir, member.split("/")[0]))
+    return [os.path.abspath(path) for path in roots if os.path.exists(path)]
+
+
+def extract_and_rename_all(archive_path: str, dataset_name: str, target_dir: str):
     base_dir = os.path.dirname(os.path.abspath(archive_path))
+    extract_dir = os.path.join(base_dir, f".extract_{dataset_name}")
     lower = archive_path.lower()
     extracted_roots = []
 
-    # ---------- 解压 ----------
-    if lower.endswith(".zip"):
-        with zipfile.ZipFile(archive_path, "r") as zf:
-            for m in zf.namelist():
-                _safe_join(base_dir, m)
-            zf.extractall(base_dir)
-            extracted_roots = [os.path.join(base_dir, m.split('/')[0]) for m in zf.namelist()]
+    if os.path.exists(extract_dir):
+        shutil.rmtree(extract_dir)
+    os.makedirs(extract_dir, exist_ok=True)
 
-    elif lower.endswith((".tar.gz", ".tgz", ".tar")):
-        mode = "r:gz" if lower.endswith((".tar.gz", ".tgz")) else "r"
-        with tarfile.open(archive_path, mode) as tf:
-            for m in tf.getmembers():
-                _safe_join(base_dir, m.name)
-            tf.extractall(base_dir)
-            extracted_roots = [os.path.join(base_dir, m.name.split('/')[0]) for m in tf.getmembers()]
+    try:
+        if lower.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                members = zf.namelist()
+                for member in members:
+                    _safe_join(extract_dir, member)
+                zf.extractall(extract_dir)
+                extracted_roots = _collect_extracted_roots(extract_dir, members)
 
-    elif lower.endswith(".gz"):
-        out = os.path.join(base_dir, os.path.basename(archive_path)[:-3])
-        with gzip.open(archive_path, "rb") as fin, open(out, "wb") as fout:
-            shutil.copyfileobj(fin, fout)
-        extracted_roots = [out]
+        elif lower.endswith((".tar.gz", ".tgz", ".tar")):
+            mode = "r:gz" if lower.endswith((".tar.gz", ".tgz")) else "r"
+            with tarfile.open(archive_path, mode) as tf:
+                members = [member.name for member in tf.getmembers()]
+                for member in members:
+                    _safe_join(extract_dir, member)
+                tf.extractall(extract_dir)
+                extracted_roots = _collect_extracted_roots(extract_dir, members)
 
-    else:
-        return
+        elif lower.endswith(".gz"):
+            out = os.path.join(extract_dir, os.path.basename(archive_path)[:-3])
+            with gzip.open(archive_path, "rb") as fin, open(out, "wb") as fout:
+                shutil.copyfileobj(fin, fout)
+            extracted_roots = [out]
 
-    extracted_roots = list({os.path.abspath(p) for p in extracted_roots if os.path.exists(p)})
+        else:
+            return
 
-    # ---------- 重命名根目录 ----------
-    final_root = os.path.join(base_dir, dataset_name)
-    if len(extracted_roots) == 1 and os.path.isdir(extracted_roots[0]):
-        root = extracted_roots[0]
-        if root != final_root:
-            if os.path.exists(final_root):
-                shutil.rmtree(final_root)
-            os.rename(root, final_root)
-    else:
-        final_root = extracted_roots[0]
+        extracted_roots = list(dict.fromkeys(extracted_roots))
+        if not extracted_roots:
+            raise RuntimeError(f"No files extracted from archive: {archive_path}")
 
-    # ---------- 递归重命名文件 ----------
-    for dirpath, _, filenames in os.walk(final_root):
-        for fname in filenames:
-            old_path = os.path.join(dirpath, fname)
-            root, ext = os.path.splitext(fname)
-            new_name = dataset_name + ext
-            new_path = os.path.join(dirpath, new_name)
+        if len(extracted_roots) == 1 and os.path.isdir(extracted_roots[0]):
+            _replace_path(extracted_roots[0], target_dir)
+        else:
+            os.makedirs(target_dir, exist_ok=True)
+            for root in extracted_roots:
+                dest_path = os.path.join(target_dir, os.path.basename(root))
+                if os.path.abspath(root) != os.path.abspath(dest_path):
+                    _replace_path(root, dest_path)
 
-            if old_path != new_path:
-                if os.path.exists(new_path):
-                    os.remove(new_path)
-                os.rename(old_path, new_path)
-
+        for dirpath, _, filenames in os.walk(target_dir):
+            for fname in filenames:
+                old_path = os.path.join(dirpath, fname)
+                _, ext = os.path.splitext(fname)
+                new_path = os.path.join(dirpath, f"{dataset_name}{ext}")
+                if old_path != new_path:
+                    if os.path.exists(new_path):
+                        os.remove(new_path)
+                    os.rename(old_path, new_path)
+    finally:
+        if os.path.exists(extract_dir):
+            shutil.rmtree(extract_dir)
 
 
 def main():
@@ -168,8 +192,8 @@ def main():
     if args.dataset not in url_map:
         print(f"[Error] dataset '{args.dataset}' not found in {args.url_file}")
         print("Available datasets (partial):")
-        for k in list(url_map.keys())[:20]:
-            print(f"  - {k}")
+        for key in list(url_map.keys())[:20]:
+            print(f"  - {key}")
         sys.exit(1)
 
     url = url_map[args.dataset]
@@ -178,7 +202,7 @@ def main():
 
     archive_name = os.path.basename(url)
     archive_path = os.path.join(output_root, archive_name)
-    target_dir = os.path.join(output_root, args.dataset)
+    target_dir = build_target_dir(output_root, args.dataset)
 
     if os.path.exists(target_dir) and os.listdir(target_dir) and not args.overwrite:
         print(f"[Info] Target directory already exists and not empty: {target_dir}")
@@ -189,7 +213,7 @@ def main():
 
     try:
         download_with_progress(url, archive_path)
-        extract_and_rename_all(archive_path, args.dataset)
+        extract_and_rename_all(archive_path, args.dataset, target_dir)
         if os.path.exists(archive_path):
             os.remove(archive_path)
             print(f"[Info] Removed archive: {archive_path}")

@@ -119,6 +119,21 @@ def load_item_meta_recbole(file_path, sep='\t'):
     return items
 
 
+def resolve_recbole_input_root(input_path, dataset_name):
+    prefixed_root = os.path.join(input_path, f"recbole_{dataset_name}")
+    legacy_root = os.path.join(input_path, dataset_name)
+
+    for candidate_root in [prefixed_root, legacy_root]:
+        rating_file_path = os.path.join(candidate_root, f'{dataset_name}.inter')
+        meta_file_path = os.path.join(candidate_root, f'{dataset_name}.item')
+        if os.path.exists(rating_file_path) and os.path.exists(meta_file_path):
+            return candidate_root
+
+    raise FileNotFoundError(
+        f"RecBole dataset files not found under '{prefixed_root}' or '{legacy_root}'"
+    )
+
+
 def preprocess_recbole(args):
     """
     处理 recbole 数据集。
@@ -127,7 +142,7 @@ def preprocess_recbole(args):
     print(' Dataset: ', args.dataset)
 
     # 动态构造输入文件根目录
-    input_root_path = os.path.join(args.input_path, args.dataset)
+    input_root_path = resolve_recbole_input_root(args.input_path, args.dataset)
     # 动态构造 ratings 文件路径
     rating_file_path = os.path.join(input_root_path,f'{args.dataset}.inter')
     if not os.path.exists(rating_file_path):

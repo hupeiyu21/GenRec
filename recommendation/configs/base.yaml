@@ -8,8 +8,8 @@ training_params:
   early_stop: 10
   seed: 2023
   device: 'cuda:0'
-  num_workers: 32
-  eval_interval: 1
+  num_workers: 4
+  eval_interval: 5
   weight_decay: 0.01
 
 model_params:
@@ -19,7 +19,7 @@ model_params:
 evaluation_params:
   topk_list: [5, 10, 20]
   beam_size: 20
-  batch_size: 1024
+  batch_size: 32
 
 # 所有模型共享的路徑模板
 paths:

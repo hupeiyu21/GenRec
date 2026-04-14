@@ -4,7 +4,6 @@ from typing import List, Dict, Any, Callable
 import numpy as np
 import random
 import logging
-from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +329,7 @@ class LCRecTokenizer(BaseTokenizer):
         self.is_training = is_training
         model_params = config["model_params"]
         model_name_or_path = model_params["model_name_or_path"]
+        from transformers import AutoTokenizer
 
         self.llm_tokenizer = AutoTokenizer.from_pretrained(
             model_name_or_path,

@@ -16,6 +16,11 @@ import json
 
 VALID_QUANT_METHODS = {"rkmeans", "rvq", "rqvae", "opq", "pq", 'vqvae', 'mm_rqvae'}
 
+
+def _load_yaml_file(path: Path | str):
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
 def _ensure_dir_exists(dir_path: Path):
     """确保目录存在"""
     if dir_path:
@@ -42,8 +47,7 @@ def _load_quant_details(path: str, quant_method: str) -> dict:
     if not Path(path).is_file():
         raise FileNotFoundError(f"[Config] 根據約定，未找到量化設定檔: {path}")
     
-    with open(path, 'r') as f:
-        cfg = yaml.safe_load(f)
+    cfg = _load_yaml_file(path)
         
     if quant_method not in cfg or 'model_params' not in cfg[quant_method]:
         raise ValueError(f"[Config] 在 {path} 中缺少 '{quant_method}.model_params' 節點")
@@ -65,15 +69,13 @@ def load_and_process_config(model_name: str, dataset_name: str, quant_method: st
     base_config_path = Path("configs/base.yaml")
     if not base_config_path.is_file():
         raise FileNotFoundError(f"基礎設定檔未找到: {base_config_path}")
-    with open(base_config_path, 'r') as f:
-        config = yaml.safe_load(f)
+    config = _load_yaml_file(base_config_path)
 
     # 載入特定模型設定檔
     model_config_path = Path(f"configs/{model_name}.yaml")
     if not model_config_path.is_file():
         raise FileNotFoundError(f"模型配置文件未找到: {model_config_path}")
-    with open(model_config_path, 'r') as f:
-        model_config = yaml.safe_load(f)
+    model_config = _load_yaml_file(model_config_path)
         
     # ✨ 使用遞迴更新，讓 model_config 覆蓋 base_config
     config = _recursive_update(config, model_config)

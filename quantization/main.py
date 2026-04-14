@@ -1,7 +1,6 @@
 # /quantization/main.py
 
 import argparse
-import yaml
 import numpy as np
 import torch
 import logging
@@ -68,7 +67,7 @@ def main():
     else: config_path = args.config_path
     logging.info(f"使用配置文件: {config_path}")
     if not os.path.exists(config_path): logging.error(f"配置文件未找到: {config_path}"); return
-    with open(config_path, 'r') as f: config = yaml.safe_load(f)
+    config = utils.load_yaml_file(config_path)
     config['model_name'] = args.model_name
     config['dataset_name'] = args.dataset_name
     

@@ -1,4 +1,4 @@
-python main.py --model_name rqvae --dataset_name amazon-musical-instruments-23 --embedding_modality text  --embedding_model sentence-t5-base
+python main.py --model_name rqvae --dataset_name ml-100k --embedding_modality text  --embedding_model sentence-t5-base
 
 # 多模态
 python main.py \
