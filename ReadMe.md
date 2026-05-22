@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./asset/logo.png" width="200" alt="UniGenRec Logo">
 
-  <h1>UniGenRec: A Unified Generative Recommendation Toolbox</h1>
+  <h1>GenRec: A Unified Generative Recommendation Toolbox</h1>
 
   <p>
     <strong>Modular • Configuration-Driven • Reproducible</strong>
