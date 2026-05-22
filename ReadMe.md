@@ -17,7 +17,7 @@
 
 ---
 
-**UniGenRec** is an open-source, end-to-end framework designed to standardize the **Generative Recommendation (GenRec)** workflow. It provides a reproducible pipeline covering **Representation → Tokenization → Modeling → Training → Inference**.
+**GenRec** is an open-source, end-to-end framework designed to standardize the **Generative Recommendation (GenRec)** workflow. It provides a reproducible pipeline covering **Representation → Tokenization → Modeling → Training → Inference**.
 
 📘 arXiv Paper (coming soon)  
 
@@ -30,7 +30,7 @@ Generative Recommendation is shifting the paradigm from **scoring/matching** to 
 **The Result:** Models are difficult to compare, hard to extend, and often unreproducible.
 
 ## 🎯 Our Goal
-**UniGenRec** solves this by providing a **single, plug-and-play stack** that unifies the entire lifecycle.
+**GenRec** solves this by providing a **single, plug-and-play stack** that unifies the entire lifecycle.
 
 - **🧩 Fully Modular:** Decoupled components for Tokenization, Backbones, and Inference.
 - **⚙️ Config-Driven:** Manage complex experiments with simple YAML configurations.
