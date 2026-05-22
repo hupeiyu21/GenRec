@@ -89,8 +89,8 @@ Inference (Beam Search / Prefix-tree / Contrastive Rerank)
 - PyTorch, CUDA, and other dependencies will be installed automatically via `requirements.txt`
 
 ```bash
-git clone https://github.com/yourname/UniGenRec
-cd UniGenRec
+git clone https://github.com/yourname/GenRec
+cd GenRec
 pip install -r requirements.txt
 ```
 ## 1 Data Preprocessing
